@@ -12,10 +12,14 @@ services:
       FACE_DIR: /app/faces
       MATCH_THRESHOLD: "0.363"      # 높이면 더 엄격(오탐↓ 미탐↑), 낮추면 더 관대
       BLUR_OTHERS: "1"              # 일반인 얼굴 블러 (0이면 끔)
-      CAM_WIDTH: "1280"             # 화질: 1280x720 (끊기거나 느리면 640 / 480으로)
-      CAM_HEIGHT: "720"
+      CAM_WIDTH: "1920"             # 이 웹캠은 1920x1080 MJPG만 지원
+      CAM_HEIGHT: "1080"
+      CAM_FPS: "15"                 # 카메라 초당 장수 (끊기면 10)
+      DISPLAY_WIDTH: "1280"         # 받은 즉시 이 폭으로 줄여서 처리 (끊기면 960)
+      AI_MAX_FPS: "6"               # AI 판별 초당 횟수 상한 (끊기면 4)
+      AI_THREADS: "2"               # AI가 쓰는 CPU 코어 수
       JPEG_QUALITY: "88"            # 화면 전송 화질 (60~95)
-      STREAM_FPS: "20"              # 화면 초당 장수. 끊기면 15
+      STREAM_FPS: "15"              # 화면 초당 장수 (카메라와 같게)
       AI_WIDTH: "640"               # AI 판별용 축소 폭 (화면 화질과 무관)
       YOLO_IMGSZ: "320"             # 느리면 256, 정확도 필요하면 416
       CAMERA_ON_START: "1"          # 0이면 서버가 켜져도 카메라는 꺼진 채 시작

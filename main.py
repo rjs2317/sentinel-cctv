@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 from ultralytics import YOLO
 
-APP_VERSION = "v4 (2026-10-27) 실시간 화면·카메라 ON/OFF"
+APP_VERSION = "v5 (2026-10-27) 1080p 입력·끊김 개선"
 
 # ───────── Prometheus 지표 (Grafana 관제 패널용) ─────────
 M_ALERT = Gauge("cctv_alert_active", "범인 경보 상태 (1=범인 감지, 0=정상)")
@@ -48,11 +48,14 @@ CONFIDENCE = float(os.getenv("CONFIDENCE", "0.5"))
 ALERT_HOLD_SEC = float(os.getenv("ALERT_HOLD_SEC", "2.0"))
 LOG_PATH = Path(os.getenv("CCTV_LOG", str(BASE_DIR / "cctv_events.log")))
 
-CAM_WIDTH = int(os.getenv("CAM_WIDTH", "1280"))        # 카메라 해상도 (높을수록 선명)
-CAM_HEIGHT = int(os.getenv("CAM_HEIGHT", "720"))
-CAM_FPS = int(os.getenv("CAM_FPS", "30"))
+CAM_WIDTH = int(os.getenv("CAM_WIDTH", "1920"))        # 카메라에서 받는 해상도 (이 웹캠은 1920x1080만 지원)
+CAM_HEIGHT = int(os.getenv("CAM_HEIGHT", "1080"))
+CAM_FPS = int(os.getenv("CAM_FPS", "15"))              # 카메라 초당 장수 (30/25/20/15/10/5 지원, 낮을수록 CPU 여유)
+DISPLAY_WIDTH = int(os.getenv("DISPLAY_WIDTH", "1280"))  # 받은 즉시 이 폭으로 줄여서 처리·전송 (끊김 방지)
+AI_MAX_FPS = float(os.getenv("AI_MAX_FPS", "6"))       # AI 판별 최대 초당 횟수 (영상용 CPU 남겨두기)
+AI_THREADS = int(os.getenv("AI_THREADS", "2"))         # AI가 쓰는 CPU 코어 수
 JPEG_QUALITY = int(os.getenv("JPEG_QUALITY", "88"))    # 화면 전송 화질 (60~95)
-STREAM_FPS = int(os.getenv("STREAM_FPS", "20"))        # 브라우저로 보내는 초당 장수 (높을수록 부드럽지만 무거움)
+STREAM_FPS = int(os.getenv("STREAM_FPS", "15"))        # 브라우저로 보내는 초당 장수 (높을수록 부드럽지만 무거움)
 AI_WIDTH = int(os.getenv("AI_WIDTH", "640"))           # AI는 이 폭으로 줄여서 판별 (화면 화질과 무관, 속도용)
 YOLO_IMGSZ = int(os.getenv("YOLO_IMGSZ", "320"))       # YOLO 입력 크기 (낮을수록 빠름)
 CAMERA_ON_START = os.getenv("CAMERA_ON_START", "1") == "1"
@@ -213,7 +216,10 @@ class FrameGrabber:
         fps = cap.get(cv2.CAP_PROP_FPS)
         print(f"camera resolution: {w}x{h} @ {fps:.0f}fps (requested {CAM_WIDTH}x{CAM_HEIGHT})", flush=True)
         with state_lock:
-            state["resolution"] = f"{w}x{h}"
+            if w > DISPLAY_WIDTH:
+                state["resolution"] = f"{w}x{h} → {DISPLAY_WIDTH}x{int(h * DISPLAY_WIDTH / w)} @ {fps:.0f}fps"
+            else:
+                state["resolution"] = f"{w}x{h} @ {fps:.0f}fps"
         return cap
 
     def _run(self):
@@ -241,6 +247,10 @@ class FrameGrabber:
                 cap.release()
                 cap = None
                 continue
+            fw = frame.shape[1]
+            if fw > DISPLAY_WIDTH:   # 1080p를 받은 즉시 줄여두면 이후 모든 처리가 가벼워짐
+                fh = int(frame.shape[0] * DISPLAY_WIDTH / fw)
+                frame = cv2.resize(frame, (DISPLAY_WIDTH, fh), interpolation=cv2.INTER_AREA)
             with self.lock:
                 if self.enabled:
                     self.frame, self.ok = frame, True
@@ -258,9 +268,16 @@ class FrameGrabber:
 
 def ai_loop():
     """AI 스레드: 최신 화면을 가져와 사람·범인 판별 → 결과와 경보 상태만 갱신"""
+    try:                                   # AI가 CPU를 독차지해서 영상이 끊기지 않도록 코어 수 제한
+        import torch
+        torch.set_num_threads(AI_THREADS)
+    except Exception:
+        pass
     model = YOLO(MODEL_PATH)
     engine = FaceEngine()
     hits = 0
+    min_gap = 1.0 / AI_MAX_FPS if AI_MAX_FPS > 0 else 0
+    last_run = 0.0
     last_seq = -1
     t_count, t_start = 0, time.time()
 
@@ -290,8 +307,13 @@ def ai_loop():
         if seq == last_seq:          # 새 화면이 아직 없으면 잠깐 대기
             time.sleep(0.005)
             continue
+        wait = min_gap - (time.time() - last_run)
+        if wait > 0:                 # AI 속도 제한 → 남는 CPU는 영상에 사용
+            time.sleep(wait)
+            continue
         last_seq = seq
         now = time.time()
+        last_run = now
 
         # AI용으로 작게 줄이기 (화면 화질과 무관, 속도용)
         h, w = frame.shape[:2]
