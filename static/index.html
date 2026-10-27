@@ -42,6 +42,7 @@
   <div class="screen"><img src="/video" alt="CCTV 실시간 영상"></div>
   <div class="panel">
     <button id="soundBtn">🔔 경보음 켜기</button>
+    <button class="sub" id="camBtn">📷 카메라 끄기</button>
 
     <h3>범인 등록</h3>
     <button class="sub" id="enrollBtn">📸 지금 얼굴을 범인으로 등록</button>
@@ -53,6 +54,8 @@
     <div class="row">탐지된 사람 <b id="count">0</b></div>
     <div class="row">일반인 <b id="visitors">0</b></div>
     <div class="row">서버 연결 <b id="conn">확인 중</b></div>
+    <div class="row">해상도 <b id="res">-</b></div>
+    <div class="row">버전 <b id="ver" style="font-size:12px">-</b></div>
 
     <h3>경보 기록</h3>
     <ul id="log"></ul>
@@ -74,6 +77,19 @@
     const res = await fetch(url, { method: "POST" });
     return res.json();
   }
+
+  let camEnabled = true;
+  function renderCamBtn() {
+    $("camBtn").textContent = camEnabled ? "📷 카메라 끄기" : "📷 카메라 켜기";
+    $("camBtn").className = camEnabled ? "sub" : "";
+  }
+  $("camBtn").addEventListener("click", async () => {
+    $("camBtn").disabled = true;
+    try {
+      const r = await post(camEnabled ? "/camera/off" : "/camera/on");
+      if (r.ok) { camEnabled = r.camera_enabled; renderCamBtn(); }
+    } finally { $("camBtn").disabled = false; }
+  });
 
   $("enrollBtn").addEventListener("click", async () => {
     $("msg").textContent = "등록 중...";
@@ -113,9 +129,12 @@
       const res = await fetch("/status", { cache: "no-store" });
       const s = await res.json();
       $("conn").textContent = "정상";
-      $("cam").textContent = s.camera_ok ? "작동 중" : "신호 없음";
+      if (s.camera_enabled !== camEnabled) { camEnabled = s.camera_enabled; renderCamBtn(); }
+      $("cam").textContent = !s.camera_enabled ? "꺼짐" : (s.camera_ok ? "작동 중" : "켜는 중");
       $("count").textContent = s.person_count;
       $("visitors").textContent = s.visitor_count;
+      $("res").textContent = s.resolution || "-";
+      $("ver").textContent = s.version || "구버전";
       $("enrolled").textContent = s.enrolled;
       document.body.classList.toggle("alert", s.alert);
       $("badge").textContent = s.alert ? "⚠ 범인 감지" : (s.enrolled ? "정상" : "범인 미등록");
