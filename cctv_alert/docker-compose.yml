@@ -1,0 +1,18 @@
+services:
+  cctv:
+    build: .
+    container_name: sentinel-cctv
+    ports:
+      - "5001:5001"
+    devices:
+      - "/dev/video0:/dev/video0"   # Kali에 연결된 웹캠을 컨테이너에 전달
+    environment:
+      CAMERA_SOURCE: "0"
+      CCTV_LOG: /app/logs/cctv_events.log
+      FACE_DIR: /app/faces
+      MATCH_THRESHOLD: "0.363"      # 높이면 더 엄격(오탐↓ 미탐↑), 낮추면 더 관대
+      BLUR_OTHERS: "1"              # 일반인 얼굴 블러 (0이면 끔)
+    volumes:
+      - ./logs:/app/logs            # 감지 로그 (Loki 수집용)
+      - ./faces:/app/faces          # 범인 얼굴 특징값 (GitHub에 올리지 않음)
+    restart: unless-stopped

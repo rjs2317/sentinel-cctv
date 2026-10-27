@@ -1,0 +1,11 @@
+.git
+__pycache__
+venv
+logs
+faces
+models
+*.log
+*.pt
+*.npy
+README.md
+GRAFANA.md
