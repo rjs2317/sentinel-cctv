@@ -1,6 +1,11 @@
 __pycache__/
 venv/
 *.pt
+*.onnx
+models/
 logs/*
 !logs/.gitkeep
+faces/*
+!faces/.gitkeep
 *.log
+*.npy
