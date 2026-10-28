@@ -66,12 +66,36 @@
   let lastAlert = false;
   const $ = (id) => document.getElementById(id);
 
-  $("soundBtn").addEventListener("click", () => {
+  // 경보음: static 폴더의 alarm 파일(mp3/wav/ogg/m4a)이 있으면 그 소리, 없으면 기본 삐 소리
+  const alarm = new Audio("/alarm-sound");
+  alarm.loop = true;
+  let alarmReady = false;      // 파일이 실제로 있는지
+  let soundOn = false;         // 사용자가 경보음 켜기를 눌렀는지
+  alarm.addEventListener("canplaythrough", () => { alarmReady = true; }, { once: true });
+  alarm.addEventListener("error", () => { alarmReady = false; });
+  alarm.load();
+
+  $("soundBtn").addEventListener("click", async () => {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     audioCtx.resume();
-    $("soundBtn").textContent = "🔊 경보음 켜짐";
+    // 브라우저 정책상 클릭할 때 한 번 재생해야 이후 자동 재생이 허용됨
+    try { alarm.muted = true; await alarm.play(); alarm.pause(); alarm.currentTime = 0; alarm.muted = false; } catch (e) {}
+    soundOn = true;
+    $("soundBtn").textContent = alarmReady ? "🔊 경보음 켜짐 (사용자 음원)" : "🔊 경보음 켜짐 (기본음)";
     $("soundBtn").classList.add("on");
   });
+
+  function startAlarm() {
+    if (!soundOn) return;
+    if (alarmReady) {
+      if (alarm.paused) alarm.play().catch(() => {});
+    } else {
+      beep();
+    }
+  }
+  function stopAlarm() {
+    if (!alarm.paused) { alarm.pause(); alarm.currentTime = 0; }
+  }
 
   async function post(url) {
     const res = await fetch(url, { method: "POST" });
@@ -139,7 +163,7 @@
       document.body.classList.toggle("alert", s.alert);
       $("badge").textContent = s.alert ? "⚠ 범인 감지" : (s.enrolled ? "정상" : "범인 미등록");
 
-      if (s.alert) beep();
+      if (s.alert) startAlarm(); else stopAlarm();
       if (s.alert && !lastAlert) addLog("범인 감지", "d");
       if (!s.alert && lastAlert) addLog("경보 해제", "c");
       lastAlert = s.alert;

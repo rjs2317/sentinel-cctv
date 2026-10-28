@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 from ultralytics import YOLO
 
-APP_VERSION = "v5 (2026-10-27) 1080p 입력·끊김 개선"
+APP_VERSION = "v6 (2026-10-27) 사용자 경보음 지원"
 
 # ───────── Prometheus 지표 (Grafana 관제 패널용) ─────────
 M_ALERT = Gauge("cctv_alert_active", "범인 경보 상태 (1=범인 감지, 0=정상)")
@@ -472,6 +472,19 @@ def mjpeg_stream():
 def index():
     return FileResponse(BASE_DIR / "static" / "index.html",
                         headers={"Cache-Control": "no-store"})
+
+
+ALARM_TYPES = {".mp3": "audio/mpeg", ".wav": "audio/wav", ".ogg": "audio/ogg", ".m4a": "audio/mp4"}
+
+
+@app.get("/alarm-sound")
+def alarm_sound():
+    """static 폴더의 alarm.mp3 / alarm.wav / alarm.ogg / alarm.m4a 중 있는 파일을 경보음으로 사용"""
+    for ext, mime in ALARM_TYPES.items():
+        path = BASE_DIR / "static" / f"alarm{ext}"
+        if path.exists():
+            return FileResponse(path, media_type=mime, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"ok": False, "message": "static 폴더에 alarm.mp3 파일이 없습니다."}, status_code=404)
 
 
 @app.get("/video")
