@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 from ultralytics import YOLO
 
-APP_VERSION = "v6 (2026-10-27) 사용자 경보음 지원"
+APP_VERSION = "v9 (2026-10-29) 범인 탐지 실시간 메시지"
 
 # ───────── Prometheus 지표 (Grafana 관제 패널용) ─────────
 M_ALERT = Gauge("cctv_alert_active", "범인 경보 상태 (1=범인 감지, 0=정상)")
@@ -471,6 +471,13 @@ def mjpeg_stream():
 @app.get("/")
 def index():
     return FileResponse(BASE_DIR / "static" / "index.html",
+                        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/embed")
+def embed():
+    """Grafana 패널에 넣는 관제용 화면 (영상 + 경보 표시 + 자동 경보음)"""
+    return FileResponse(BASE_DIR / "static" / "embed.html",
                         headers={"Cache-Control": "no-store"})
 
 

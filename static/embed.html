@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SentinelHub CCTV (관제용)</title>
+<style>
+  :root { --ok:#3ecf8e; --alert:#ff3b3b; }
+  html, body { margin:0; height:100%; background:#000; overflow:hidden; font-family:system-ui,"Malgun Gothic",sans-serif; }
+  #wrap { position:relative; width:100%; height:100%; box-sizing:border-box; border:6px solid transparent; }
+  body.alert #wrap { border-color:var(--alert); animation:blink .6s infinite; }
+  @keyframes blink { 50% { border-color:#5a0000; } }
+  #video { width:100%; height:100%; object-fit:contain; display:block; }
+  #badge { position:absolute; top:10px; right:10px; padding:5px 12px; border-radius:999px; font-weight:700; font-size:14px;
+           background:rgba(20,50,35,.85); color:var(--ok); }
+  body.alert #badge { background:rgba(80,10,10,.9); color:var(--alert); }
+  #sound { position:absolute; left:10px; bottom:10px; padding:6px 12px; border:0; border-radius:8px; font-size:13px; font-weight:700;
+           cursor:pointer; background:rgba(43,108,255,.9); color:#fff; }
+  #sound.on { background:rgba(20,50,35,.85); color:var(--ok); }
+  #toast { position:absolute; top:12px; left:50%; transform:translate(-50%,-160%); padding:10px 18px; border-radius:10px;
+           font-size:16px; font-weight:800; color:#fff; background:#c81e1e; text-align:center; white-space:nowrap;
+           box-shadow:0 8px 24px rgba(0,0,0,.5); transition:transform .25s ease; }
+  #toast.show { transform:translate(-50%,0); }
+  #toast.alert { animation:pulse 1s infinite; }
+  #toast.clear { background:#16794a; }
+  #toast small { display:block; font-size:12px; font-weight:600; opacity:.9; }
+  @keyframes pulse { 50% { background:#7a0d0d; } }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <img id="video" src="/video" alt="CCTV 실시간 영상">
+  <span id="badge">정상</span>
+  <div id="toast" role="alert" aria-live="assertive"></div>
+  <button id="sound" type="button">🔔 경보음 켜기</button>
+</div>
+<script>
+  // 관제 화면용: 페이지를 열면 경보음을 자동으로 켜려고 시도한다.
+  // 브라우저가 막으면(사용자 클릭 전) 버튼이 남고, 화면 아무 곳이나 한 번 클릭하면 켜진다.
+  const $ = (id) => document.getElementById(id);
+  const alarm = new Audio("/alarm-sound");
+  alarm.loop = true;
+  let alarmReady = false, soundOn = false, ctx = null, lastAlert = false, high = false;
+  alarm.addEventListener("canplaythrough", () => { alarmReady = true; }, { once: true });
+  alarm.load();
+
+  async function enableSound() {
+    try {
+      if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+      await ctx.resume();
+      if (ctx.state !== "running") return false;
+      alarm.muted = true;
+      await alarm.play().catch(() => {});
+      alarm.pause(); alarm.currentTime = 0; alarm.muted = false;
+      soundOn = true;
+      $("sound").textContent = "🔊 경보음 켜짐";
+      $("sound").classList.add("on");
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // 1) 열리자마자 자동으로 시도 (자동 재생이 허용된 브라우저면 바로 켜짐)
+  enableSound();
+  // 2) 막혔으면 화면 아무 곳이나 처음 클릭/키 입력 때 켜기
+  ["pointerdown", "keydown"].forEach(ev =>
+    document.addEventListener(ev, () => { if (!soundOn) enableSound(); }, { capture: true }));
+
+  function beep() {
+    if (!ctx || ctx.state !== "running") return;
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = "square";
+    osc.frequency.value = (high = !high) ? 960 : 720;
+    gain.gain.value = 0.12;
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + 0.3);
+  }
+  function startAlarm() {
+    if (!soundOn) return;
+    if (alarmReady) { if (alarm.paused) alarm.play().catch(() => {}); }
+    else beep();
+  }
+  function stopAlarm() { if (!alarm.paused) { alarm.pause(); alarm.currentTime = 0; } }
+
+  let toastTimer = null;
+  function showToast(title, detail, kind) {
+    const t = $("toast");
+    clearTimeout(toastTimer);
+    t.className = "";
+    t.innerHTML = "";
+    t.append(title);
+    if (detail) { const s = document.createElement("small"); s.textContent = detail; t.append(s); }
+    t.classList.add("show", kind);
+    if (kind === "clear") toastTimer = setTimeout(() => t.classList.remove("show"), 4000);
+  }
+
+  async function poll() {
+    try {
+      const s = await (await fetch("/status", { cache: "no-store" })).json();
+      document.body.classList.toggle("alert", s.alert);
+      $("badge").textContent = s.alert ? "⚠ 범인 감지"
+        : (!s.camera_enabled ? "카메라 꺼짐" : (s.camera_ok ? "정상" : "카메라 연결 중"));
+      if (s.alert) startAlarm(); else stopAlarm();
+      const now = new Date().toLocaleTimeString("ko-KR");
+      if (s.alert && !lastAlert) showToast("⚠ 범인 감지", now, "alert");
+      if (!s.alert && lastAlert) showToast("✔ 경보 해제", now, "clear");
+      lastAlert = s.alert;
+    } catch (e) {
+      $("badge").textContent = "서버 연결 끊김";
+    }
+  }
+  setInterval(poll, 600);
+  poll();
+
+  // 영상이 끊기면 3초 뒤 다시 연결 (Grafana에 오래 띄워둘 때 대비)
+  $("video").addEventListener("error", () => {
+    setTimeout(() => { $("video").src = "/video?t=" + Date.now(); }, 3000);
+  });
+</script>
+</body>
+</html>
