@@ -64,6 +64,7 @@
     <div class="row">탐지된 사람 <b id="count">0</b></div>
     <div class="row">일반인 <b id="visitors">0</b></div>
     <div class="row">서버 연결 <b id="conn">확인 중</b></div>
+    <div class="row">Grafana 로그 전송 <b id="loki" title="">-</b></div>
     <div class="row">해상도 <b id="res">-</b></div>
     <div class="row">버전 <b id="ver" style="font-size:12px">-</b></div>
 
@@ -184,6 +185,9 @@
       $("visitors").textContent = s.visitor_count;
       $("res").textContent = s.resolution || "-";
       $("ver").textContent = s.version || "구버전";
+      $("loki").textContent = s.loki || "-";
+      $("loki").title = s.loki_error || "";
+      $("loki").style.color = s.loki === "전송 실패" ? "var(--alert)" : "";
       $("enrolled").textContent = s.enrolled;
       document.body.classList.toggle("alert", s.alert);
       $("badge").textContent = s.alert ? "⚠ 범인 감지" : (s.enrolled ? "정상" : "범인 미등록");

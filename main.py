@@ -15,7 +15,9 @@ SentinelHub CCTV 범인 탐지 서버 (FastAPI + OpenCV + YOLO + 얼굴 인식)
 """
 import json
 import os
+import queue
 import threading
+import urllib.request
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -28,7 +30,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 from ultralytics import YOLO
 
-APP_VERSION = "v9 (2026-10-29) 범인 탐지 실시간 메시지"
+APP_VERSION = "v10 (2026-10-29) Grafana 로그 연동"
 
 # ───────── Prometheus 지표 (Grafana 관제 패널용) ─────────
 M_ALERT = Gauge("cctv_alert_active", "범인 경보 상태 (1=범인 감지, 0=정상)")
@@ -69,6 +71,11 @@ CONFIRM_HITS = int(os.getenv("CONFIRM_HITS", "2"))               # 연속 N번 �
 MIN_FACE = int(os.getenv("MIN_FACE", "30"))                      # 이보다 작은 얼굴은 판별하지 않음(AI 화면 기준 px)
 BLUR_OTHERS = os.getenv("BLUR_OTHERS", "1") == "1"               # 일반인 얼굴 블러 처리
 SUSPECT_ID = os.getenv("SUSPECT_ID", "suspect-01")               # 로그에는 이름 대신 가명 ID
+
+# Grafana(Loki)로 경보 기록 보내기 — 비워두면 보내지 않음
+LOKI_URL = os.getenv("LOKI_URL", "").rstrip("/")                  # 예: http://192.168.0.4:3100
+LOKI_JOB = os.getenv("LOKI_JOB", "sentinelhub-cctv")              # Grafana 쿼리: {job="sentinelhub-cctv"}
+CCTV_HOST = os.getenv("CCTV_HOST", "192.168.0.108")               # 로그에 남길 CCTV 위치(서버 주소)
 
 PERSON_CLASS_ID = 0
 RED = (0, 0, 255)
@@ -135,16 +142,56 @@ def save_embeddings(items):
         EMB_PATH.unlink()
 
 
+# ───────── Loki 전송 (영상·AI를 막지 않도록 별도 스레드에서) ─────────
+loki_queue: "queue.Queue[tuple[int, dict]]" = queue.Queue(maxsize=500)
+loki_status = {"state": "꺼짐" if not LOKI_URL else "대기 중", "error": ""}
+ALERT_EVENTS = {"suspect_detected"}
+
+
+def loki_push(ts_ns: int, record: dict):
+    body = {"streams": [{
+        "stream": {"job": LOKI_JOB, "level": "critical" if record["event"] in ALERT_EVENTS else "info"},
+        "values": [[str(ts_ns), json.dumps(record, ensure_ascii=False)]],
+    }]}
+    req = urllib.request.Request(f"{LOKI_URL}/loki/api/v1/push",
+                                 data=json.dumps(body).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=3) as res:
+        if res.status >= 300:
+            raise RuntimeError(f"HTTP {res.status}")
+
+
+def loki_worker():
+    while True:
+        ts_ns, record = loki_queue.get()
+        for attempt in range(3):                 # 실패하면 2초 간격으로 3번까지 다시 시도
+            try:
+                loki_push(ts_ns, record)
+                loki_status.update(state="정상", error="")
+                break
+            except Exception as e:               # Loki가 꺼져 있어도 CCTV는 계속 동작
+                loki_status.update(state="전송 실패", error=str(e)[:120])
+                time.sleep(2)
+        else:
+            print(f"[loki] 전송 포기: {record['event']} ({loki_status['error']})", flush=True)
+
+
 def write_event(event: str, **fields):
     record = {
         "time": datetime.now().astimezone().isoformat(timespec="seconds"),
         "source": "cctv",
+        "host": CCTV_HOST,
         "event": event,
         **fields,
     }
     with LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
     print(record, flush=True)
+    if LOKI_URL:
+        try:
+            loki_queue.put_nowait((time.time_ns(), record))
+        except queue.Full:
+            pass
     return record
 
 
@@ -444,7 +491,10 @@ async def lifespan(app: FastAPI):
     grabber = FrameGrabber(enabled=CAMERA_ON_START)
     threading.Thread(target=render_loop, daemon=True).start()
     threading.Thread(target=ai_loop, daemon=True).start()
+    if LOKI_URL:
+        threading.Thread(target=loki_worker, daemon=True).start()
     print(f"SentinelHub CCTV {APP_VERSION}", flush=True)
+    write_event("server_start", version=APP_VERSION.split()[0])
     yield
 
 
@@ -513,6 +563,8 @@ def status():
             "resolution": state["resolution"],
             "enrolled": len(suspect_embeddings),
             "last_event": state["last_event"],
+            "loki": loki_status["state"],
+            "loki_error": loki_status["error"],
         }
 
 

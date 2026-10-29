@@ -23,6 +23,8 @@ services:
       AI_WIDTH: "640"               # AI 판별용 축소 폭 (화면 화질과 무관)
       YOLO_IMGSZ: "320"             # 느리면 256, 정확도 필요하면 416
       CAMERA_ON_START: "1"          # 0이면 서버가 켜져도 카메라는 꺼진 채 시작
+      LOKI_URL: "http://192.168.0.4:3100"   # 팀원 PC의 Loki (Grafana Detail_Logs에 경보 기록 표시)
+      CCTV_HOST: "192.168.0.108"            # 로그에 남길 CCTV 위치
     volumes:
       - ./logs:/app/logs            # 감지 로그 (Loki 수집용)
       - ./faces:/app/faces          # 범인 얼굴 특징값 (GitHub에 올리지 않음)
