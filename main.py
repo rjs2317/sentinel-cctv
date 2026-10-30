@@ -1,10 +1,10 @@
 """
-SentinelHub CCTV 범인 탐지 서버 (FastAPI + OpenCV + YOLO + 얼굴 인식)
+SentinelHub CCTV 블랙리스트 탐지 서버 (FastAPI + OpenCV + YOLO + 얼굴 인식)
 
-- YOLO로 사람을 찾고, OpenCV 얼굴 인식(YuNet + SFace)으로 '등록된 범인'인지 판별
-- 범인  → 빨간 박스 + 화면 빨간 테두리 + 경고음 + 로그
+- YOLO로 사람을 찾고, OpenCV 얼굴 인식(YuNet + SFace)으로 '블랙리스트'에 등록된 사람인지 판별
+- 블랙리스트  → 빨간 박스 + 화면 빨간 테두리 + 경고음 + 로그
 - 일반인 → 초록 박스, 경보 없음 (얼굴은 자동 블러 처리 = 개인정보 마스킹)
-- 범인 등록은 CCTV 페이지의 '내 얼굴 등록' 버튼으로 (사진 원본은 저장하지 않고 특징값만 저장)
+- 블랙리스트 등록은 CCTV 페이지의 '내 얼굴 등록' 버튼으로 (사진 원본은 저장하지 않고 특징값만 저장)
 
 딜레이를 줄이기 위해 3개의 스레드로 나눠서 동작:
   1) 카메라 스레드 : 웹캠에서 계속 읽고 '가장 최신 화면'만 보관
@@ -30,17 +30,17 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 from ultralytics import YOLO
 
-APP_VERSION = "v10 (2026-10-29) Grafana 로그 연동"
+APP_VERSION = "v12 (2026-10-30) 블랙리스트 문구"
 
 # ───────── Prometheus 지표 (Grafana 관제 패널용) ─────────
-M_ALERT = Gauge("cctv_alert_active", "범인 경보 상태 (1=범인 감지, 0=정상)")
+M_ALERT = Gauge("cctv_alert_active", "블랙리스트 경보 상태 (1=블랙리스트 감지, 0=정상)")
 M_PERSONS = Gauge("cctv_person_count", "현재 화면에서 탐지된 사람 수")
 M_VISITORS = Gauge("cctv_visitor_count", "현재 화면의 일반인 수")
 M_CAMERA = Gauge("cctv_camera_up", "카메라 신호 상태 (1=정상, 0=신호 없음)")
 M_CAM_ENABLED = Gauge("cctv_camera_enabled", "카메라 켜짐 여부 (1=켜짐, 0=관리자가 끔)")
-M_ENROLLED = Gauge("cctv_suspect_templates", "등록된 범인 얼굴 특징값 개수")
+M_ENROLLED = Gauge("cctv_suspect_templates", "등록된 블랙리스트 얼굴 특징값 개수")
 M_AI_FPS = Gauge("cctv_ai_fps", "AI 판별 속도 (초당 처리 횟수)")
-M_INTRUSIONS = Counter("cctv_intrusions", "누적 범인 감지 횟수")
+M_INTRUSIONS = Counter("cctv_intrusions", "누적 블랙리스트 감지 횟수")
 
 # ───────── 설정 (환경변수로 바꿀 수 있음) ─────────
 BASE_DIR = Path(__file__).resolve().parent
@@ -67,10 +67,10 @@ FACE_REC_MODEL = os.getenv("FACE_REC_MODEL", str(BASE_DIR / "models" / "face_rec
 FACE_DIR = Path(os.getenv("FACE_DIR", str(BASE_DIR / "faces")))
 EMB_PATH = FACE_DIR / "suspect_embeddings.npy"
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.363"))  # SFace 코사인 유사도 권장 기준
-CONFIRM_HITS = int(os.getenv("CONFIRM_HITS", "2"))               # 연속 N번 일치해야 범인 확정 (오탐 방지)
+CONFIRM_HITS = int(os.getenv("CONFIRM_HITS", "2"))               # 연속 N번 일치해야 블랙리스트 확정 (오탐 방지)
 MIN_FACE = int(os.getenv("MIN_FACE", "30"))                      # 이보다 작은 얼굴은 판별하지 않음(AI 화면 기준 px)
 BLUR_OTHERS = os.getenv("BLUR_OTHERS", "1") == "1"               # 일반인 얼굴 블러 처리
-SUSPECT_ID = os.getenv("SUSPECT_ID", "suspect-01")               # 로그에는 이름 대신 가명 ID
+SUSPECT_ID = os.getenv("SUSPECT_ID", "blacklist-01")               # 로그에는 이름 대신 가명 ID
 
 # Grafana(Loki)로 경보 기록 보내기 — 비워두면 보내지 않음
 LOKI_URL = os.getenv("LOKI_URL", "").rstrip("/")                  # 예: http://192.168.0.4:3100
@@ -224,7 +224,7 @@ def draw_alert_border(frame):
     h, w = frame.shape[:2]
     t = max(8, w // 90)
     cv2.rectangle(frame, (0, 0), (w - 1, h - 1), RED, t)
-    cv2.putText(frame, "SUSPECT DETECTED", (24, 24 + t * 3), cv2.FONT_HERSHEY_SIMPLEX,
+    cv2.putText(frame, "BLACKLIST DETECTED", (24, 24 + t * 3), cv2.FONT_HERSHEY_SIMPLEX,
                 max(0.8, w / 1280), RED, 3)
 
 
@@ -314,7 +314,7 @@ class FrameGrabber:
 
 
 def ai_loop():
-    """AI 스레드: 최신 화면을 가져와 사람·범인 판별 → 결과와 경보 상태만 갱신"""
+    """AI 스레드: 최신 화면을 가져와 사람·블랙리스트 판별 → 결과와 경보 상태만 갱신"""
     try:                                   # AI가 CPU를 독차지해서 영상이 끊기지 않도록 코어 수 제한
         import torch
         torch.set_num_threads(AI_THREADS)
@@ -461,11 +461,11 @@ def render_loop():
         for p in persons:
             is_suspect = any(center_inside(fb, p) for fb in suspect_faces)
             color = RED if is_suspect else GREEN
-            label = "SUSPECT" if is_suspect else "VISITOR"
+            label = "BLACKLIST" if is_suspect else "VISITOR"
             cv2.rectangle(frame, (p[0], p[1]), (p[2], p[3]), color, thick)
             cv2.putText(frame, label, (p[0], max(p[1] - 10, 24)), cv2.FONT_HERSHEY_SIMPLEX, font, color, 2)
         if not enrolled:
-            cv2.putText(frame, "NO SUSPECT ENROLLED", (24, frame.shape[0] - 24),
+            cv2.putText(frame, "NO BLACKLIST ENROLLED", (24, frame.shape[0] - 24),
                         cv2.FONT_HERSHEY_SIMPLEX, font, (0, 200, 255), 2)
         if is_alert:
             draw_alert_border(frame)
@@ -570,7 +570,7 @@ def status():
 
 @app.post("/enroll")
 def enroll():
-    """지금 화면에 보이는 얼굴 1명을 범인으로 등록 (특징값만 저장)"""
+    """지금 화면에 보이는 얼굴 1명을 블랙리스트에 등록 (특징값만 저장)"""
     global enroll_engine
     ok, _, frame = grabber.read() if grabber else (False, 0, None)
     if not ok:
@@ -598,7 +598,7 @@ def enroll():
 
 @app.post("/enroll/reset")
 def enroll_reset():
-    """등록된 범인 특징값 전부 삭제"""
+    """등록된 블랙리스트 특징값 전부 삭제"""
     with state_lock:
         suspect_embeddings.clear()
         save_embeddings(suspect_embeddings)

@@ -97,11 +97,11 @@
     try {
       const s = await (await fetch("/status", { cache: "no-store" })).json();
       document.body.classList.toggle("alert", s.alert);
-      $("badge").textContent = s.alert ? "⚠ 범인 감지"
+      $("badge").textContent = s.alert ? "⚠ 블랙리스트 감지"
         : (!s.camera_enabled ? "카메라 꺼짐" : (s.camera_ok ? "정상" : "카메라 연결 중"));
       if (s.alert) startAlarm(); else stopAlarm();
       const now = new Date().toLocaleTimeString("ko-KR");
-      if (s.alert && !lastAlert) showToast("⚠ 범인 감지", now, "alert");
+      if (s.alert && !lastAlert) showToast("⚠ 블랙리스트 감지", now, "alert");
       if (!s.alert && lastAlert) showToast("✔ 경보 해제", now, "clear");
       lastAlert = s.alert;
     } catch (e) {

@@ -33,7 +33,7 @@
   li.c { color:var(--ok); }
   li.new { animation:flash 1.2s ease-out 2; }
   @keyframes flash { 0% { background:rgba(255,59,59,.35); } 100% { background:transparent; } }
-  /* 범인 탐지 실시간 메시지 */
+  /* 블랙리스트 탐지 실시간 메시지 */
   #toast { position:fixed; top:16px; left:50%; transform:translate(-50%,-150%); z-index:50; min-width:300px; max-width:90vw;
            padding:14px 22px; border-radius:12px; font-size:18px; font-weight:800; text-align:center; color:#fff;
            background:#c81e1e; box-shadow:0 10px 30px rgba(0,0,0,.5); transition:transform .25s ease; }
@@ -68,8 +68,8 @@
     <div class="row">해상도 <b id="res">-</b></div>
     <div class="row">버전 <b id="ver" style="font-size:12px">-</b></div>
 
-    <h3>범인 등록</h3>
-    <button class="sub" id="enrollBtn">📸 지금 얼굴을 범인으로 등록</button>
+    <h3>블랙리스트 등록</h3>
+    <button class="sub" id="enrollBtn">📸 지금 얼굴을 블랙리스트에 등록</button>
     <button class="danger" id="resetBtn">🗑 등록 초기화</button>
     <div class="msg" id="msg">정면·옆모습 등 3~5번 등록하면 더 정확해요.</div>
   </div>
@@ -137,7 +137,7 @@
   });
 
   $("resetBtn").addEventListener("click", async () => {
-    if (!window.confirm("등록된 범인 얼굴 특징값을 모두 삭제할까요?")) return;
+    if (!window.confirm("블랙리스트에 등록된 얼굴 특징값을 모두 삭제할까요?")) return;
     const r = await post("/enroll/reset");
     $("msg").textContent = r.ok ? "등록이 초기화되었습니다." : "초기화 실패";
   });
@@ -161,7 +161,7 @@
     $("log").prepend(li);
   }
 
-  // 범인 탐지 실시간 메시지 (화면 위쪽 배너)
+  // 블랙리스트 탐지 실시간 메시지 (화면 위쪽 배너)
   let toastTimer = null;
   function showToast(title, detail, kind) {
     const t = $("toast");
@@ -190,13 +190,13 @@
       $("loki").style.color = s.loki === "전송 실패" ? "var(--alert)" : "";
       $("enrolled").textContent = s.enrolled;
       document.body.classList.toggle("alert", s.alert);
-      $("badge").textContent = s.alert ? "⚠ 범인 감지" : (s.enrolled ? "정상" : "범인 미등록");
+      $("badge").textContent = s.alert ? "⚠ 블랙리스트 감지" : (s.enrolled ? "정상" : "블랙리스트 미등록");
 
       if (s.alert) startAlarm(); else stopAlarm();
       const now = new Date().toLocaleTimeString("ko-KR");
       if (s.alert && !lastAlert) {
-        addLog("범인 감지", "d");
-        showToast("⚠ 범인 감지", now + " · 화면 속 사람 " + s.person_count + "명", "alert");
+        addLog("블랙리스트 감지", "d");
+        showToast("⚠ 블랙리스트 감지", now + " · 화면 속 사람 " + s.person_count + "명", "alert");
       }
       if (!s.alert && lastAlert) {
         addLog("경보 해제", "c");
