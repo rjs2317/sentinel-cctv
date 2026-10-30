@@ -70,6 +70,9 @@
 
     <h3>블랙리스트 등록</h3>
     <button class="sub" id="enrollBtn">📸 지금 얼굴을 블랙리스트에 등록</button>
+    <input type="file" id="photoFile" accept="image/jpeg,image/png" style="display:none">
+    <button class="sub" id="photoBtn">🖼 사진 파일로 블랙리스트 등록</button>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin:2px 0 6px"><input type="checkbox" id="consentChk"> 등록 대상의 동의를 받은 사진입니다</label>
     <button class="danger" id="resetBtn">🗑 등록 초기화</button>
     <div class="msg" id="msg">정면·옆모습 등 3~5번 등록하면 더 정확해요.</div>
   </div>
@@ -133,6 +136,22 @@
     try {
       const r = await post("/enroll");
       $("msg").textContent = r.ok ? `등록 완료 (총 ${r.templates}개)` : r.message;
+    } catch (e) { $("msg").textContent = "등록 실패: 서버 연결 확인"; }
+  });
+
+  $("photoBtn").addEventListener("click", () => {
+    if (!$("consentChk").checked) { $("msg").textContent = "동의 확인 칸을 먼저 체크해 주세요."; return; }
+    $("photoFile").click();
+  });
+  $("photoFile").addEventListener("change", async () => {
+    const f = $("photoFile").files[0];
+    $("photoFile").value = "";
+    if (!f) return;
+    $("msg").textContent = "사진에서 얼굴 찾는 중...";
+    try {
+      const res = await fetch("/enroll/photo?consent=yes", { method: "POST", headers: { "Content-Type": f.type || "application/octet-stream" }, body: f });
+      const r = await res.json();
+      $("msg").textContent = r.ok ? `사진으로 등록 완료 (총 ${r.templates}개)` : r.message;
     } catch (e) { $("msg").textContent = "등록 실패: 서버 연결 확인"; }
   });
 

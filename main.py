@@ -25,12 +25,13 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
 from ultralytics import YOLO
 
-APP_VERSION = "v12 (2026-10-30) 블랙리스트 문구"
+APP_VERSION = "v13 (2026-10-30) 사진으로 블랙리스트 등록"
 
 # ───────── Prometheus 지표 (Grafana 관제 패널용) ─────────
 M_ALERT = Gauge("cctv_alert_active", "블랙리스트 경보 상태 (1=블랙리스트 감지, 0=정상)")
@@ -592,8 +593,52 @@ def enroll():
         save_embeddings(suspect_embeddings)
         n = len(suspect_embeddings)
     M_ENROLLED.set(n)
-    write_event("suspect_enrolled", subject=SUSPECT_ID, templates=n)
+    write_event("suspect_enrolled", subject=SUSPECT_ID, templates=n, method="camera")
     return {"ok": True, "templates": n}
+
+
+PHOTO_MAX_BYTES = 10 * 1024 * 1024
+
+
+def enroll_from_image(data: bytes):
+    """사진 파일에서 얼굴 1개를 찾아 특징값만 저장 (사진 자체는 저장하지 않음)"""
+    global enroll_engine
+    img = cv2.imdecode(np.frombuffer(data, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        return 400, {"ok": False, "message": "사진을 읽을 수 없습니다. jpg 또는 png 파일을 올려주세요."}
+    h, w = img.shape[:2]
+    scale = w / AI_WIDTH if w > AI_WIDTH else 1.0
+    small = cv2.resize(img, (int(w / scale), int(h / scale))) if scale > 1 else img   # 실시간 판별과 같은 크기로
+    with enroll_lock:
+        if enroll_engine is None:
+            enroll_engine = FaceEngine()
+        faces = enroll_engine.detect(small)
+        if len(faces) != 1:
+            return 400, {"ok": False,
+                         "message": f"사진에서 얼굴이 {len(faces)}개 보입니다. 한 사람 얼굴이 크게 나온 사진을 써주세요."}
+        feat = enroll_engine.embed(small, faces[0])
+    del img, small
+    with state_lock:
+        suspect_embeddings.append(feat)
+        save_embeddings(suspect_embeddings)
+        n = len(suspect_embeddings)
+    M_ENROLLED.set(n)
+    write_event("suspect_enrolled", subject=SUSPECT_ID, templates=n, method="photo")
+    return 200, {"ok": True, "templates": n}
+
+
+@app.post("/enroll/photo")
+async def enroll_photo(request: Request, consent: str = ""):
+    """사진 파일로 블랙리스트 등록. 동의 확인(consent=yes)이 있어야 처리"""
+    if consent != "yes":
+        return JSONResponse({"ok": False, "message": "등록 대상의 동의를 확인해 주세요."}, status_code=400)
+    data = await request.body()
+    if not data:
+        return JSONResponse({"ok": False, "message": "사진 파일이 비어 있습니다."}, status_code=400)
+    if len(data) > PHOTO_MAX_BYTES:
+        return JSONResponse({"ok": False, "message": "사진은 10MB 이하만 가능합니다."}, status_code=400)
+    code, body = await run_in_threadpool(enroll_from_image, data)
+    return JSONResponse(body, status_code=code)
 
 
 @app.post("/enroll/reset")
