@@ -10,7 +10,7 @@ services:
       CAMERA_SOURCE: "0"
       CCTV_LOG: /app/logs/cctv_events.log
       FACE_DIR: /app/faces
-      MATCH_THRESHOLD: "0.363"      # 높이면 더 엄격(오탐↓ 미탐↑), 낮추면 더 관대
+      MATCH_THRESHOLD: "0.7"      # 높이면 더 엄격(오탐↓ 미탐↑), 낮추면 더 관대
       BLUR_OTHERS: "1"              # 일반인 얼굴 블러 (0이면 끔)
       CAM_WIDTH: "1920"             # 이 웹캠은 1920x1080 MJPG만 지원
       CAM_HEIGHT: "1080"
