@@ -11,6 +11,7 @@ services:
       CCTV_LOG: /app/logs/cctv_events.log
       FACE_DIR: /app/faces
       MATCH_THRESHOLD: "0.7"      # 높이면 더 엄격(오탐↓ 미탐↑), 낮추면 더 관대
+      ALERT_HOLD_SEC: "10"          # 얼굴이 안 보여도 이 시간(초) 동안은 같은 등장으로 보고 경보 유지
       BLUR_OTHERS: "1"              # 일반인 얼굴 블러 (0이면 끔)
       CAM_WIDTH: "1920"             # 이 웹캠은 1920x1080 MJPG만 지원
       CAM_HEIGHT: "1080"
